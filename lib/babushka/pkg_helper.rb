@@ -12,7 +12,7 @@ module Babushka
     end
 
     def has? pkg, opts = {}
-      pkg = ver(pkg)
+      pkg = ver(pkg, opts[:version])
       returning _has?(pkg) do |matching_version|
         matching_pkg = ver(pkg.name, (matching_version if matching_version.is_a?(VersionStr)))
         unless opts[:log] == false

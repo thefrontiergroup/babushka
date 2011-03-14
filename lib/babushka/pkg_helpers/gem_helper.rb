@@ -7,11 +7,54 @@ module Babushka
     def manager_dep; 'rubygems' end
 
     def _install! pkgs, opts
-      pkgs.each {|pkg|
-        log_shell "Installing #{pkg} via #{manager_key}",
-          "#{pkg_cmd} install #{cmdline_spec_for pkg} #{opts}",
-          :sudo => should_sudo?
-      }
+      # determine if to add rvm command prefix 
+      rvm_cmd   = with_rvm? ? "rvm #{@rvm_string} " : ""
+      ruby_info = with_rvm? ? "in rvm #{@rvm_string}" : "system ruby"
+      pkgs.each do |pkg|
+        key = "Installing #{pkg} via #{manager_key} #{ruby_info}"
+        command = "#{rvm_cmd}#{pkg_cmd} install #{cmdline_spec_for pkg} #{opts}"
+        log_shell key, command, :sudo => should_sudo?
+      end
+    end
+
+    def install gemname, version_string=nil
+      log "Using #{current_ruby_version} #{with_rvm? ? "(using rvm)" : "(system ruby)"}"
+      rvm_cmd   = with_rvm? ? "rvm #{@ruby_string} " : ""
+      log "About to run command: #{rvm_cmd}gem install #{gemname} #{version_string}"
+      log_shell "Installing #{gemname} #{version_string||"latest"}", "#{rvm_cmd}gem install #{gemname} #{version_string}" do |shell|
+        shell.stdout.split("\n").last
+      end
+    end
+
+    def with_ruby ruby_version, gemset="global"
+      with_ruby_string "#{ruby_version}@#{gemset}"
+    end
+
+    # Will set the current ruby string to use with rvm
+    def with_ruby_string ruby_string
+      @ruby_string = ruby_string
+      self
+    end
+
+    # Will reset the ruby string to use the default
+    def reset_ruby
+      @ruby_string = nil
+      @_cached_env_info= nil
+    end
+
+    # Determine if we are intending to use rvm support
+    def with_rvm?
+      !@ruby_string.nil?
+    end
+
+    # Respond with the current ruby version (rvm or system)
+    def current_ruby_version
+      with_rvm? ? full_ruby_version(@ruby_string) : shell("ruby -v")
+    end
+
+    # Expand an rvm alias to a full string
+    def full_ruby_version name
+      shell("rvm tools strings #{name}")
     end
 
     def gem_path_for gem_name, version = nil
@@ -82,8 +125,14 @@ module Babushka
       shell %Q{#{ruby} -e "require '#{Babushka::Path.lib / 'babushka'}'; puts Babushka::GemHelper.ruby_binary_slug"}
     end
 
+    # Determine if to use sudo.
+    # If using rvm always false else determine writable
     def should_sudo?
-      super || (gem_root.exists? && !gem_root.writable?)
+      if with_rvm?
+        false
+      else
+        super || (gem_root.exists? && !gem_root.writable?)
+      end
     end
 
     def version
@@ -96,11 +145,17 @@ module Babushka
       }
     end
 
+    def installed_versions package_name
+      versions = versions_of(package_name)
+      versions.empty? ? "none" : versions.collect { |v| v.to_s }.join(", ")
+    end
 
     private
 
     def _has? pkg
-      versions_of(pkg).sort.reverse.detect {|version| pkg.matches? version }
+      versions_of(pkg).sort.reverse.detect do |version|
+        pkg.matches? version
+      end
     end
 
     def versions_of pkg
@@ -119,7 +174,15 @@ module Babushka
     end
 
     def env_info
-      @_cached_env_info ||= shell('gem env')
+      unless with_rvm?
+        @_cached_env_info ||= shell("gem env")
+      else
+        # clear out if this request is for a new ruby
+        @_cached_env_info = nil if(@ruby_string != @last_ruby_string)
+        @ruby_string ||= "default"
+        @last_ruby_string = @ruby_string
+        @_cached_env_info ||= shell("rvm #{@ruby_string} gem env")
+      end
     end
   end
   end

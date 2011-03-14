@@ -1,6 +1,7 @@
 Gemfile.lock
 .bundle/
 .idea
+.yarddoc
 sources
 sources.yml
 coverage
